@@ -1,1 +1,3 @@
-# lovable-paynow-backend
+git init
+git add .
+git commit -m "Paynow relay"
