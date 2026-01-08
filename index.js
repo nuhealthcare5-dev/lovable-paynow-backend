@@ -9,10 +9,17 @@ app.get("/", (req, res) => {
   res.send("Paynow Relay Server is running");
 });
 
+// Warn if env vars missing
+if (!process.env.PAYNOW_INTEGRATION_ID || !process.env.PAYNOW_INTEGRATION_KEY) {
+  console.error("❌ Paynow credentials missing");
+}
+
 // Initialize Paynow
 const paynow = new Paynow(
   process.env.PAYNOW_INTEGRATION_ID,
-  process.env.PAYNOW_INTEGRATION_KEY
+  process.env.PAYNOW_INTEGRATION_KEY,
+  "https://your-lovable-app.com/payment-success",
+  "https://lovable-paynow-backend-production.up.railway.app/paynow-webhook"
 );
 
 // CREATE PAYMENT
@@ -21,20 +28,21 @@ app.post("/create-payment", async (req, res) => {
     const { email, amount, currency, reference } = req.body;
 
     if (!email || !amount || !reference) {
-      return res.status(400).json({
-        error: "Missing required fields"
-      });
+      return res.status(400).json({ error: "Missing required fields" });
     }
 
-    // Create payment
     const payment = paynow.createPayment(reference, email);
-    payment.add("Subscription", amount);
 
-    // Send to Paynow
+    // Currency handling
+    if (currency === "USD") {
+      payment.add("Subscription", amount, "USD");
+    } else {
+      payment.add("Subscription", amount);
+    }
+
     const response = await paynow.send(payment);
 
     if (response.success) {
-      // ✅ THIS IS THE CRITICAL FIX
       return res.json({
         success: true,
         redirectUrl: response.redirectUrl,
