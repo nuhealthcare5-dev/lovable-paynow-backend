@@ -1,4 +1,5 @@
 import express from "express";
+import Paynow from "paynow";
 
 const app = express();
 app.use(express.json());
@@ -8,29 +9,72 @@ app.get("/", (req, res) => {
   res.send("Paynow Relay Server is running");
 });
 
-// ✅ CREATE PAYMENT (THIS FIXES THE 404)
+// Initialize Paynow
+const paynow = new Paynow(
+  process.env.PAYNOW_INTEGRATION_ID,
+  process.env.PAYNOW_INTEGRATION_KEY
+);
+
+// CREATE PAYMENT
 app.post("/create-payment", async (req, res) => {
   try {
-    // TODO: Paynow initiate logic
-    res.json({ success: true, message: "Payment created" });
+    const { email, amount, currency, reference } = req.body;
+
+    if (!email || !amount || !reference) {
+      return res.status(400).json({
+        error: "Missing required fields"
+      });
+    }
+
+    // Create payment
+    const payment = paynow.createPayment(reference, email);
+    payment.add("Subscription", amount);
+
+    // Send to Paynow
+    const response = await paynow.send(payment);
+
+    if (response.success) {
+      // ✅ THIS IS THE CRITICAL FIX
+      return res.json({
+        success: true,
+        redirectUrl: response.redirectUrl,
+        pollUrl: response.pollUrl
+      });
+    } else {
+      return res.status(400).json({
+        success: false,
+        error: response.error
+      });
+    }
+
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Create payment failed" });
+    console.error("Paynow relay error:", err);
+    res.status(500).json({
+      success: false,
+      error: "Paynow relay failed"
+    });
   }
 });
 
-// ✅ CHECK PAYMENT STATUS
+// CHECK PAYMENT STATUS
 app.post("/check-payment", async (req, res) => {
   try {
-    // TODO: Paynow status logic
-    res.json({ status: "paid" });
+    const { pollUrl } = req.body;
+
+    if (!pollUrl) {
+      return res.status(400).json({ error: "pollUrl required" });
+    }
+
+    const status = await paynow.pollTransaction(pollUrl);
+    res.json(status);
+
   } catch (err) {
-    console.error(err);
+    console.error("Poll error:", err);
     res.status(500).json({ error: "Status check failed" });
   }
 });
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, "0.0.0.0", () => {
-  console.log(`Relay running on port ${PORT}`);
+  console.log(`🚆 Paynow relay running on port ${PORT}`);
 });
