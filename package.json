@@ -1,0 +1,17 @@
+{
+  "name": "paynow-relay",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "engines": {
+    "node": "18.x"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "paynow": "^2.2.0",
+    "cors": "^2.8.5"
+  }
+}
