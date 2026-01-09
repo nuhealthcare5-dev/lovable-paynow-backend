@@ -1,114 +1,74 @@
 import express from "express";
-import paynowPkg from "paynow";
-
-const { Paynow } = paynowPkg;
+import fetch from "node-fetch";
 
 const app = express();
 app.use(express.json());
 
-/* ===============================
-   BASIC HEALTH CHECK
-================================ */
+// Health check
 app.get("/", (req, res) => {
-  res.send("✅ Paynow Relay Server is running");
+  res.send("Railway Paynow Proxy is running");
 });
 
-/* ===============================
-   ENV VALIDATION (DO NOT CRASH)
-================================ */
-if (!process.env.PAYNOW_INTEGRATION_ID || !process.env.PAYNOW_INTEGRATION_KEY) {
-  console.error("❌ PAYNOW credentials are missing in Railway variables");
-}
-
-/* ===============================
-   INITIALIZE PAYNOW
-================================ */
-const paynow = new Paynow(
-  process.env.PAYNOW_INTEGRATION_ID,
-  process.env.PAYNOW_INTEGRATION_KEY
-);
-
-/* ===============================
-   CREATE PAYMENT
-   POST /create-payment
-================================ */
+/**
+ * CREATE PAYMENT
+ * Lovable / Supabase → Railway → VPS → Paynow
+ */
 app.post("/create-payment", async (req, res) => {
   try {
-    const { email, amount, reference } = req.body;
+    const response = await fetch(
+      `${process.env.PAYNOW_RELAY_URL}/create-payment`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-relay-secret": process.env.RELAY_SECRET
+        },
+        body: JSON.stringify(req.body)
+      }
+    );
 
-    if (!email || !amount || !reference) {
-      return res.status(400).json({
-        success: false,
-        error: "email, amount and reference are required"
-      });
-    }
-
-    // Create Paynow payment
-    const payment = paynow.createPayment(reference, email);
-    payment.add("Subscription", amount);
-
-    // Send payment request to Paynow
-    const response = await paynow.send(payment);
-
-    if (!response.success) {
-      return res.status(400).json({
-        success: false,
-        error: response.error || "Payment creation failed"
-      });
-    }
-
-    // ✅ IMPORTANT: return redirectUrl + pollUrl
-    return res.json({
-      success: true,
-      redirectUrl: response.redirectUrl,
-      pollUrl: response.pollUrl
-    });
+    const data = await response.json();
+    res.status(response.status).json(data);
 
   } catch (err) {
-    console.error("🔥 Create payment error:", err);
-    return res.status(500).json({
+    console.error("VPS relay error:", err);
+    res.status(500).json({
       success: false,
-      error: "Internal Paynow relay error"
+      error: "VPS relay unreachable"
     });
   }
 });
 
-/* ===============================
-   CHECK PAYMENT STATUS
-   POST /check-payment
-================================ */
+/**
+ * CHECK PAYMENT STATUS
+ */
 app.post("/check-payment", async (req, res) => {
   try {
-    const { pollUrl } = req.body;
+    const response = await fetch(
+      `${process.env.PAYNOW_RELAY_URL}/check-payment`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-relay-secret": process.env.RELAY_SECRET
+        },
+        body: JSON.stringify(req.body)
+      }
+    );
 
-    if (!pollUrl) {
-      return res.status(400).json({
-        success: false,
-        error: "pollUrl is required"
-      });
-    }
-
-    const status = await paynow.pollTransaction(pollUrl);
-
-    return res.json({
-      success: true,
-      status
-    });
+    const data = await response.json();
+    res.status(response.status).json(data);
 
   } catch (err) {
-    console.error("🔥 Poll payment error:", err);
-    return res.status(500).json({
-      success: false,
-      error: "Failed to check payment status"
+    console.error("VPS relay error:", err);
+    res.status(500).json({
+      error: "VPS relay unreachable"
     });
   }
 });
 
-/* ===============================
-   START SERVER (RAILWAY SAFE)
-================================ */
+// Railway port binding (IMPORTANT)
 const PORT = process.env.PORT || 3000;
-
 app.listen(PORT, "0.0.0.0", () => {
-  console.log(`🚆 Paynow relay running on port ${PORT}`);
+  console.log(`🚆 Railway Paynow proxy running on port ${PORT}`);
 });
