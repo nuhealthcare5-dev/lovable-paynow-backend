@@ -5,7 +5,7 @@ const app = express();
 app.use(express.json());
 
 // ==========================
-// ENV CHECK (SAFE LOGGING)
+// ENV CHECK
 // ==========================
 console.log("ENV CHECK:", {
   PAYNOW_INTEGRATION_ID: !!process.env.PAYNOW_INTEGRATION_ID,
@@ -13,7 +13,6 @@ console.log("ENV CHECK:", {
   RELAY_SECRET: !!process.env.RELAY_SECRET,
 });
 
-// Stop boot if env vars missing
 if (
   !process.env.PAYNOW_INTEGRATION_ID ||
   !process.env.PAYNOW_INTEGRATION_KEY ||
@@ -43,4 +42,64 @@ try {
 // ==========================
 app.get("/health", (req, res) => {
   res.status(200).json({
-    status: "ok
+    status: "ok",
+    service: "paynow-relay",
+    timestamp: new Date().toISOString(),
+  });
+});
+
+// ==========================
+// CREATE PAYMENT
+// ==========================
+app.post("/create-payment", async (req, res) => {
+  try {
+    if (req.headers["x-relay-secret"] !== process.env.RELAY_SECRET) {
+      return res.status(401).json({
+        success: false,
+        error: "Unauthorized",
+      });
+    }
+
+    const { email, amount, reference } = req.body;
+
+    if (!email || !amount || !reference) {
+      return res.status(400).json({
+        success: false,
+        error: "Missing email, amount or reference",
+      });
+    }
+
+    const payment = paynow.createPayment(reference, email);
+    payment.add("Subscription", Number(amount));
+
+    const response = await paynow.send(payment);
+
+    if (!response.success) {
+      return res.status(400).json({
+        success: false,
+        error: "Paynow rejected transaction",
+      });
+    }
+
+    return res.json({
+      success: true,
+      redirectUrl: response.redirectUrl,
+      pollUrl: response.pollUrl,
+    });
+  } catch (err) {
+    console.error("PAYNOW ERROR:", err);
+    return res.status(500).json({
+      success: false,
+      error: "Payment relay error",
+    });
+  }
+});
+
+// ==========================
+// START SERVER (RAILWAY SAFE)
+// ==========================
+const PORT = process.env.PORT || 3000;
+
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`🚀 Paynow relay running on port ${PORT}`);
+});
