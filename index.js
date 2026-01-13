@@ -1,74 +1,55 @@
 import express from "express";
-import fetch from "node-fetch";
+import cors from "cors";
+import Paynow from "paynow";
 
 const app = express();
+
+/* ---------------- BASIC MIDDLEWARE ---------------- */
+app.use(cors());
 app.use(express.json());
 
-// Health check
-app.get("/", (req, res) => {
-  res.send("Railway Paynow Proxy is running");
+/* ---------------- ENV CHECK ---------------- */
+const hasEnv = {
+  PAYNOW_INTEGRATION_ID: !!process.env.PAYNOW_INTEGRATION_ID,
+  PAYNOW_INTEGRATION_KEY: !!process.env.PAYNOW_INTEGRATION_KEY,
+  RELAY_SECRET: !!process.env.RELAY_SECRET,
+};
+
+console.log("ENV CHECK:", hasEnv);
+
+if (!hasEnv.PAYNOW_INTEGRATION_ID || !hasEnv.PAYNOW_INTEGRATION_KEY) {
+  console.error("❌ PAYNOW ENV VARS MISSING");
+}
+
+/* ---------------- PAYNOW INIT ---------------- */
+let paynow = null;
+
+try {
+  paynow = new Paynow(
+    process.env.PAYNOW_INTEGRATION_ID,
+    process.env.PAYNOW_INTEGRATION_KEY
+  );
+  console.log("✅ Paynow initialized");
+} catch (err) {
+  console.error("❌ Paynow init failed:", err.message);
+}
+
+/* ---------------- HEALTH CHECK ---------------- */
+app.get("/health", (req, res) => {
+  res.status(200).json({
+    status: "ok",
+    service: "paynow-relay",
+    paynowReady: !!paynow,
+    timestamp: new Date().toISOString(),
+  });
 });
 
-/**
- * CREATE PAYMENT
- * Lovable / Supabase → Railway → VPS → Paynow
- */
+/* ---------------- CREATE PAYMENT ---------------- */
 app.post("/create-payment", async (req, res) => {
   try {
-    const response = await fetch(
-      `${process.env.PAYNOW_RELAY_URL}/create-payment`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-relay-secret": process.env.RELAY_SECRET
-        },
-        body: JSON.stringify(req.body)
-      }
-    );
+    const secret = req.headers["x-relay-secret"];
+    if (secret !== process.env.RELAY_SECRET) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
 
-    const data = await response.json();
-    res.status(response.status).json(data);
-
-  } catch (err) {
-    console.error("VPS relay error:", err);
-    res.status(500).json({
-      success: false,
-      error: "VPS relay unreachable"
-    });
-  }
-});
-
-/**
- * CHECK PAYMENT STATUS
- */
-app.post("/check-payment", async (req, res) => {
-  try {
-    const response = await fetch(
-      `${process.env.PAYNOW_RELAY_URL}/check-payment`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-relay-secret": process.env.RELAY_SECRET
-        },
-        body: JSON.stringify(req.body)
-      }
-    );
-
-    const data = await response.json();
-    res.status(response.status).json(data);
-
-  } catch (err) {
-    console.error("VPS relay error:", err);
-    res.status(500).json({
-      error: "VPS relay unreachable"
-    });
-  }
-});
-
-// Railway port binding (IMPORTANT)
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`🚆 Railway Paynow proxy running on port ${PORT}`);
-});
+    if (!paynow) {
